@@ -1,0 +1,130 @@
+-- 02_dim_tables/real_estate/dim_building_type.sql
+
+-- Log du début d'exécution
+SELECT utils.log_script_execution('create_dim_building_type.sql', 'RUNNING');
+
+-- Création de la fonction trigger
+CREATE OR REPLACE FUNCTION dw.update_building_type_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.dt_updated = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Création de la table
+CREATE TABLE IF NOT EXISTS dw.dim_building_type (
+    -- Clés et identifiants
+    cd_building_type VARCHAR(2) PRIMARY KEY,
+    
+    -- Libellés multilingues
+    tx_building_type_fr VARCHAR(100) NOT NULL,
+    tx_building_type_nl VARCHAR(100) NOT NULL,
+    tx_building_type_de VARCHAR(100) NOT NULL,
+    tx_building_type_en VARCHAR(100) NOT NULL,
+    
+    -- Gestion des versions (SCD Type 2)
+    dt_valid_from DATE NOT NULL DEFAULT CURRENT_DATE,
+    dt_valid_to DATE,
+    fl_current BOOLEAN NOT NULL DEFAULT TRUE,
+    
+    -- Traçabilité
+    dt_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    dt_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Contraintes
+    CONSTRAINT chk_building_type_format CHECK (cd_building_type ~ '^R[1-6]$'),
+    CONSTRAINT chk_dates CHECK (dt_valid_from <= COALESCE(dt_valid_to, '9999-12-31'::date))
+);
+
+-- Création des index
+CREATE INDEX IF NOT EXISTS idx_building_type_current 
+ON dw.dim_building_type(fl_current) 
+WHERE fl_current = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_building_type_dates 
+ON dw.dim_building_type(dt_valid_from, dt_valid_to);
+
+-- Création du trigger
+DROP TRIGGER IF EXISTS tr_update_building_type_timestamp ON dw.dim_building_type;
+CREATE TRIGGER tr_update_building_type_timestamp
+    BEFORE UPDATE ON dw.dim_building_type
+    FOR EACH ROW
+    EXECUTE FUNCTION dw.update_building_type_timestamp();
+
+-- Insertion des données
+INSERT INTO dw.dim_building_type (
+    cd_building_type,
+    tx_building_type_fr,
+    tx_building_type_nl,
+    tx_building_type_de,
+    tx_building_type_en
+) VALUES
+    ('R1', 
+     'Maisons de type fermé', 
+     'Huizen in gesloten bebouwing',
+     'Häuser in geschlossener Bauweise',
+     'Houses in closed building style'),
+    
+    ('R2', 
+     'Maisons de type demi-fermé',
+     'Huizen in halfopen bebouwing',
+     'Häuser in halboffener Bauweise',
+     'Houses in semi-closed building style'),
+    
+    ('R3', 
+     'Maisons de type ouvert, fermes, châteaux',
+     'Huizen in open bebouwing, hoeven en kastelen',
+     'Häuser in offener Bauweise, Bauernhöfe und Schlösser',
+     'Houses in open building style, farms and castles'),
+    
+    ('R4', 
+     'Buildings et immeubles à appartements',
+     'Buildings en flatgebouwen met appartementen',
+     'Mehrfamilienhäuser und Wohnblöcke mit Apartments',
+     'Buildings and apartment blocks'),
+    
+    ('R5', 
+     'Maisons de commerce',
+     'Handelshuizen',
+     'Geschäftshäuser',
+     'Commercial buildings'),
+    
+    ('R6', 
+     'Tous les autres bâtiments',
+     'Alle andere gebouwen',
+     'Alle anderen Gebäude',
+     'All other buildings')
+ON CONFLICT (cd_building_type) DO UPDATE SET
+    tx_building_type_fr = EXCLUDED.tx_building_type_fr,
+    tx_building_type_nl = EXCLUDED.tx_building_type_nl,
+    tx_building_type_de = EXCLUDED.tx_building_type_de,
+    tx_building_type_en = EXCLUDED.tx_building_type_en,
+    dt_updated = CURRENT_TIMESTAMP;
+
+-- Enregistrement dans le registre
+INSERT INTO metadata.table_registry (
+    nm_schema,
+    nm_table,
+    tx_description,
+    cd_source
+) VALUES (
+    'dw',
+    'dim_building_type',
+    'Dimension des types de bâtiments',
+    'SYSTEM'
+) ON CONFLICT (nm_schema, nm_table) DO NOTHING;
+
+-- Commentaires
+COMMENT ON TABLE dw.dim_building_type IS 'Dimension définissant les différents types de bâtiments selon la classification standardisée';
+COMMENT ON COLUMN dw.dim_building_type.cd_building_type IS 'Code unique du type de bâtiment (R1 à R6)';
+COMMENT ON COLUMN dw.dim_building_type.tx_building_type_fr IS 'Description du type de bâtiment en français';
+COMMENT ON COLUMN dw.dim_building_type.tx_building_type_nl IS 'Description du type de bâtiment en néerlandais';
+COMMENT ON COLUMN dw.dim_building_type.tx_building_type_de IS 'Description du type de bâtiment en allemand';
+COMMENT ON COLUMN dw.dim_building_type.tx_building_type_en IS 'Description du type de bâtiment en anglais';
+COMMENT ON COLUMN dw.dim_building_type.dt_valid_from IS 'Date de début de validité';
+COMMENT ON COLUMN dw.dim_building_type.dt_valid_to IS 'Date de fin de validité';
+COMMENT ON COLUMN dw.dim_building_type.fl_current IS 'Indicateur de version courante';
+
+-- Log du succès
+SELECT utils.log_script_execution('create_dim_building_type.sql', 'SUCCESS');
